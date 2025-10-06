@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "types": ["vite/client"],
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@app/*": ["../mobile/src/app/*"],
+      "@entities/*": ["../mobile/src/entities/*"],
+      "@features/*": ["../mobile/src/features/*"],
+      "@pages/*": ["../mobile/src/pages/*"],
+      "@shared/*": ["../mobile/src/shared/*"],
+      "@widgets/*": ["../mobile/src/widgets/*"],
+      "@mobile/*": ["../mobile/src/*"],
+      "@english/shared": ["../../packages/shared/src"]
+    },
+    "strict": true
+  },
+  "include": ["src"]
+}

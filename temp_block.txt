@@ -1,0 +1,149 @@
+            const r = await fetch(`${FREEDICT_URL}/${encodeURIComponent(w)}`);
+            if (!r.ok) return;
+            const j = (await r.json()) as Array<{ phonetics?: Array<{ audio?: string; text?: string }> }>;
+            const phonetics = j.flatMap((e) => e.phonetics || []);
+            const withAudio = phonetics.find((p) => p.audio) || phonetics[0];
+            if (withAudio) {
+              audioMap.set(w, { audio: withAudio.audio, transcription: withAudio.text });
+            }
+          } catch {
+            // ignore
+          }
+        }),
+      );
+      const withAudio = next.map((item) => {
+        const englishWord = (lang === 'en-ru' ? item.word : item.translation).toLowerCase();
+        const a = audioMap.get(englishWord);
+        return { ...item, audioUrl: a?.audio, transcription: item.transcription || a?.transcription };
+      });
+      if (lang === 'en-ru') {
+        // Group by English word and aggregate translations list
+        const map = new Map<string, SearchResult>();
+        for (const item of withAudio) {
+          const key = item.word;
+          const entry = map.get(key) || {
+            word: item.word,
+            translations: [],
+            partOfSpeech: item.partOfSpeech,
+            transcription: item.transcription,
+            audioUrl: item.audioUrl,
+          };
+          entry.translations!.push({ text: item.translation, partOfSpeech: item.partOfSpeech, audioUrl: item.audioUrl });
+          // Prefer transcription/audio if present
+          if (!entry.transcription && item.transcription) entry.transcription = item.transcription;
+          if (!entry.audioUrl && item.audioUrl) entry.audioUrl = item.audioUrl;
+          map.set(key, entry);
+        }
+        setResults(Array.from(map.values()).slice(0, 20));
+      } else {
+        setResults(withAudio.slice(0, 20));
+      }
+    } catch (e) {
+      setSearchError(e instanceof Error ? e.message : '?? ??????? ????????? ?????');
+      setResults([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const content = useMemo(() => {
+    if (status === 'loading') {
+      return <ActivityIndicator size="large" color="#1E88E5" />;
+    }
+    if (!items.length) {
+      return <EmptyState>{'??? ??????? ????. ??????? ????? ? ????????? ? ???????.'}</EmptyState>;
+    }
+    return (
+      <FlatList
+        data={items}
+        keyExtractor={(item) => item.id}
+        showsVerticalScrollIndicator={false}
+        ItemSeparatorComponent={() => <Separator />}
+        renderItem={({ item }) => (
+          <WordCard padded>
+            <Row>
+              <Typography variant="subtitle">{item.word}</Typography>
+              {item.audioUrl ? (
+                <AudioButton onPress={() => playAudio(`${item.id}-saved`, item.audioUrl!)}>
+                  <AudioLabel variant="caption">{playingId === `${item.id}-saved` ? '????' : '??????????'}</AudioLabel>
+                </AudioButton>
+              ) : null}
+            </Row>
+            {item.transcription ? <Typography variant="caption">{item.transcription}</Typography> : null}
+            {item.partOfSpeech ? <Typography variant="caption">{item.partOfSpeech}</Typography> : null}
+            {(() => {
+              const parts = item.translation.split(',').map((t) => t.trim()).filter(Boolean);
+              const mainText = parts[0] || item.translation;
+              const othersArr = parts.slice(1);
+              return (
+                <>
+                  <Row>
+                    <Typography>{'\u2014 '}{mainText}</Typography>
+                    <DangerButton onPress={() => { if (!profile?.id) return; dispatch(removeUserDictionaryEntry({ userId: profile.id, id: item.id })); }}>
+                      <DangerLabel variant="caption">{'\u0423\u0434\u0430\u043B\u0438\u0442\u044C'}</DangerLabel>
+                    </DangerButton>
+                  </Row>
+                  {othersArr.length ? (
+                    <Muted variant="caption">{'?????? ????????: '} {othersArr.join(', ')}</Muted>
+                  ) : null}
+                </>
+              );
+            })()}
+          </WordCard>
+        )}
+        contentContainerStyle={{ paddingBottom: 32 }}
+      />
+    );
+  }, [dispatch, items, playingId, profile?.id, status]);
+
+  return (
+    <Screen>
+      <TopRow>
+        <Typography variant="title">{'??? ???????'}</Typography>
+        <PrimaryButton onPress={openSearch}>
+          <ButtonLabel>{'????? ?????'}</ButtonLabel>
+        </PrimaryButton>
+      </TopRow>
+      {content}
+      <Animated.View
+        pointerEvents={searchOpen ? 'auto' : 'none'}
+        style={{
+          position: 'absolute',
+          top: 64,
+          left: 0,
+          right: 0,
+          height: panelHeight,
+          minHeight: minPanelHeight,
+          transform: [{ translateY: slideY }],
+          zIndex: 10,
+        }}
+      >
+        <SearchPanel>
+          <Inline>
+            <LightTitle variant="subtitle">{'????? ?????'}</LightTitle>
+            <OutlineLightButton onPress={closeSearch}>
+              <OutlineLightLabel variant="caption">{'???????'}</OutlineLightLabel>
+            </OutlineLightButton>
+          </Inline>
+          <SearchRow>
+            <SearchInput
+              placeholder={'\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u0441\u043B\u043E\u0432\u043E \u043D\u0430 \u0440\u0443\u0441\u0441\u043A\u043E\u043C \u0438\u043B\u0438 \u0430\u043D\u0433\u043B\u0438\u0439\u0441\u043A\u043E\u043C'}
+              placeholderTextColor="#9CA3AF"
+              value={query}
+              onChangeText={setQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              onSubmitEditing={submitSearch}
+            />
+            <PrimaryButton onPress={submitSearch}>
+              <ButtonLabel>{'??????'}</ButtonLabel>
+            </PrimaryButton>
+          </SearchRow>
+          {searchError ? <Typography variant="caption" style={{ color: '#D32F2F' }}>{searchError}</Typography> : null}
+          {searchLoading && !results.length ? <ActivityIndicator size="small" color="#1E88E5" /> : null}
+          {!searchLoading && !results.length ? <Muted variant="caption">{'??????? ?????, ????? ??????? ????????'}</Muted> : null}
+          {!!results.length && (
+            <FlatList
+              data={results}
+              keyExtractor={(it, idx) => `${it.word}-${it.translation}-${idx}`}

@@ -1,0 +1,181 @@
+   1: import React, { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react';
+   2: import { Animated, Dimensions, Easing, Platform, View } from 'react-native';
+   3: import styled from 'styled-components/native';
+   4: import { Audio as ExpoAudio } from 'expo-av';
+   5: 
+   6: import { useAppDispatch, useAppSelector } from '@app/store/hooks';
+   7: import { addUserDictionaryEntry } from '@features/dictionary/model/dictionarySlice';
+   8: import { Typography } from '@shared/ui';
+   9: 
+  10: type Anchor = { x: number; y: number };
+  11: type LookupData = { word: string; translation: string; audioUrl?: string; transcription?: string };
+  12: 
+  13: type Ctx = {
+  14:   open: (word: string, anchor: Anchor) => void;
+  15:   close: () => void;
+  16: };
+  17: 
+  18: const WordLookupContext = createContext<Ctx | null>(null);
+  19: 
+  20: const Card = styled.View`
+  21:   position: absolute;
+  22:   max-width: 90%;
+  23:   padding: 10px 12px;
+  24:   border-radius: ${({ theme }) => theme.radius.md}px;
+  25:   background-color: #111827;
+  26:   gap: 8px;
+  27:   elevation: 8;
+  28: `;
+  29: 
+  30: const Row = styled.View`
+  31:   flex-direction: row;
+  32:   align-items: center;
+  33:   justify-content: space-between;
+  34:   gap: 8px;
+  35: `;
+  36: 
+  37: const Pill = styled.TouchableOpacity`
+  38:   background-color: rgba(37, 99, 235, 0.12);
+  39:   border: 1px solid #2563EB;
+  40:   border-radius: ${({ theme }) => theme.radius.sm}px;
+  41:   padding: 6px 10px;
+  42: `;
+  43: 
+  44: const PillLabel = styled(Typography)`
+  45:   color: #e5e7eb;
+  46: `;
+  47: 
+  48: async function fetchLookup(word: string): Promise<LookupData> {
+  49:   const apiKey = process.env.EXPO_PUBLIC_YANDEX_DICT_KEY;
+  50:   const hasCyrillic = /[\p{Script=Cyrillic}]/u.test(word);
+  51:   const lang = hasCyrillic ? 'ru-en' : 'en-ru';
+  52:   if (!apiKey) return { word, translation: word };
+  53:   const params = new URLSearchParams({ key: apiKey, lang, text: word });
+  54:   const url = `https://dictionary.yandex.net/api/v1/dicservice.json/lookup?${params.toString()}`;
+  55:   const res = await fetch(url);
+  56:   if (!res.ok) return { word, translation: word };
+  57:   const data = (await res.json()) as { def?: Array<{ text?: string; ts?: string; pos?: string; tr?: Array<{ text?: string; pos?: string }> }>; };
+  58:   const defs = data.def ?? [];
+  59:   const first = defs[0];
+  60:   const firstTr = first?.tr?.[0]?.text ?? word;
+  61:   let audioUrl: string | undefined;
+  62:   let transcription: string | undefined = first?.ts ?? undefined;
+  63:   try {
+  64:     const english = (lang === 'en-ru' ? word : firstTr) || word;
+  65:     if (/^[A-Za-z][A-Za-z\-']*$/.test(english)) {
+  66:       const f = await fetch(`https://api.dictionaryapi.dev/api/v2/entries/en/${encodeURIComponent(english)}`);
+  67:       if (f.ok) {
+  68:         const j = (await f.json()) as Array<{ phonetics?: Array<{ audio?: string; text?: string }> }>;
+  69:         const ph = j.flatMap((e) => e.phonetics || []);
+  70:         const withAudio = ph.find((p) => p.audio) || ph[0];
+  71:         audioUrl = withAudio?.audio;
+  72:         transcription = transcription || withAudio?.text;
+  73:       }
+  74:     }
+  75:   } catch {}
+  76:   return { word, translation: firstTr, audioUrl, transcription };
+  77: }
+  78: 
+  79: export const WordLookupProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
+  80:   const [visible, setVisible] = useState(false);
+  81:   const [anchor, setAnchor] = useState<Anchor>({ x: 0, y: 0 });
+  82:   const [data, setData] = useState<LookupData | null>(null);
+  83:   const [loading, setLoading] = useState(false);
+  84:   const translateY = useRef(new Animated.Value(10)).current;
+  85:   const opacity = useRef(new Animated.Value(0)).current;
+  86:   const profile = useAppSelector((s) => s.user.profile);
+  87:   const dispatch = useAppDispatch();
+  88:   const soundRef = useRef<ExpoAudio.Sound | null>(null);
+  89:   const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
+  90: 
+  91:   const open = useCallback(async (word: string, a: Anchor) => {
+  92:     setAnchor(a);
+  93:     setVisible(true);
+  94:     setLoading(true);
+  95:     setData({ word, translation: '…' });
+  96:     Animated.parallel([
+  97:       Animated.timing(opacity, { toValue: 1, duration: 120, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+  98:       Animated.timing(translateY, { toValue: 0, duration: 120, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+  99:     ]).start();
+ 100:     try {
+ 101:       const info = await fetchLookup(word);
+ 102:       setData(info);
+ 103:     } finally {
+ 104:       setLoading(false);
+ 105:     }
+ 106:   }, [opacity, translateY]);
+ 107: 
+ 108:   const close = useCallback(() => {
+ 109:     Animated.parallel([
+ 110:       Animated.timing(opacity, { toValue: 0, duration: 100, useNativeDriver: true }),
+ 111:       Animated.timing(translateY, { toValue: 10, duration: 100, useNativeDriver: true }),
+ 112:     ]).start(() => {
+ 113:       setVisible(false);
+ 114:       setData(null);
+ 115:     });
+ 116:     if (soundRef.current) { soundRef.current.unloadAsync().catch(() => undefined); soundRef.current = null; }
+ 117:     if (htmlAudioRef.current) { htmlAudioRef.current.pause(); htmlAudioRef.current = null; }
+ 118:   }, [opacity, translateY]);
+ 119: 
+ 120:   const play = useCallback(async () => {
+ 121:     if (!data?.audioUrl) return;
+ 122:     const id = `lookup-${data.word}`;
+ 123:     try {
+ 124:       if (Platform.OS === 'web') {
+ 125:         if (htmlAudioRef.current) { htmlAudioRef.current.pause(); htmlAudioRef.current = null; return; }
+ 126:         const el = new Audio(data.audioUrl);
+ 127:         htmlAudioRef.current = el;
+ 128:         el.onended = () => { htmlAudioRef.current = null; };
+ 129:         await el.play().catch(() => { htmlAudioRef.current = null; });
+ 130:         return;
+ 131:       }
+ 132:       if (soundRef.current) { await soundRef.current.stopAsync().catch(()=>{}); await soundRef.current.unloadAsync().catch(()=>{}); soundRef.current=null; }
+ 133:       const { sound } = await ExpoAudio.Sound.createAsync({ uri: data.audioUrl });
+ 134:       soundRef.current = sound;
+ 135:       await sound.playAsync();
+ 136:       sound.setOnPlaybackStatusUpdate((s) => { if ((s as any).didJustFinish) { sound.unloadAsync().catch(()=>{}); soundRef.current = null; } });
+ 137:     } catch {}
+ 138:   }, [data?.audioUrl, data?.word]);
+ 139: 
+ 140:   const save = useCallback(() => {
+ 141:     if (!profile?.id || !data) return;
+ 142:     dispatch(addUserDictionaryEntry({ userId: profile.id, entry: { word: data.word, translation: data.translation, transcription: data.transcription, audioUrl: data.audioUrl, sourceLang: 'en', targetLang: 'ru' } }) as any);
+ 143:   }, [dispatch, profile?.id, data]);
+ 144: 
+ 145:   const value = useMemo(() => ({ open, close }), [open, close]);
+ 146: 
+ 147:   const posStyle = useMemo(() => {
+ 148:     const screen = Dimensions.get('window');
+ 149:     const left = Math.max(12, Math.min(screen.width - 12, anchor.x));
+ 150:     const top = Math.max(12, anchor.y - 48);
+ 151:     return { left, top };
+ 152:   }, [anchor]);
+ 153: 
+ 154:   return (
+ 155:     <WordLookupContext.Provider value={value}>
+ 156:       {children}
+ 157:       {visible && (
+ 158:         <Animated.View pointerEvents="box-none" style={{ position: 'absolute', left: posStyle.left, top: posStyle.top, opacity, transform: [{ translateY }] }}>
+ 159:           <Card>
+ 160:             <Row>
+ 161:               <Typography variant="subtitle" color="#F9FAFB">{data?.word}</Typography>
+ 162:               <Pill onPress={close}><PillLabel variant="caption">Закрыть</PillLabel></Pill>
+ 163:             </Row>
+ 164:             <Typography variant="body" color="#E5E7EB">{loading ? 'Загрузка…' : data?.translation}</Typography>
+ 165:             <Row>
+ 166:               <Pill onPress={play} disabled={!data?.audioUrl}><PillLabel variant="caption">Прослушать</PillLabel></Pill>
+ 167:               <Pill onPress={save} disabled={!profile?.id}><PillLabel variant="caption">Сохранить</PillLabel></Pill>
+ 168:             </Row>
+ 169:           </Card>
+ 170:         </Animated.View>
+ 171:       )}
+ 172:     </WordLookupContext.Provider>
+ 173:   );
+ 174: };
+ 175: 
+ 176: export const useWordLookup = () => {
+ 177:   const ctx = useContext(WordLookupContext);
+ 178:   if (!ctx) throw new Error('useWordLookup must be used within WordLookupProvider');
+ 179:   return ctx;
+ 180: };
+ 181: 

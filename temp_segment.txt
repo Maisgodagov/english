@@ -1,0 +1,82 @@
+              if (!aggregated.entry.transcription && audioData.transcription) {
+                aggregated.entry.transcription = audioData.transcription;
+              }
+            }
+          }
+
+          aggregated.entry.translations.sort((a, b) => a.text.localeCompare(b.text, 'ru'));
+          aggregated.entry.synonyms.sort((a, b) => a.localeCompare(b, 'ru'));
+          aggregated.entry.examples.sort((a, b) => a.localeCompare(b, 'ru'));
+
+          return aggregated.entry;
+        });
+
+        setResults(finalEntries);
+      } catch (err) {
+        if (isCancelled || controller.signal.aborted) return;
+        console.error(err);
+        setError(err instanceof Error ? err.message : 'Не удалось получить данные словаря');
+        setResults([]);
+      } finally {
+        if (!isCancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    fetchData();
+
+    return () => {
+      isCancelled = true;
+      controller.abort();
+    };
+  }, [apiKey, searchTerm]);
+
+  const content = useMemo(() => {
+    if (!searchTerm && !isLoading) {
+      return (
+        <EmptyState>
+          Введите слово на русском или английском, чтобы посмотреть перевод и произношение.
+        </EmptyState>
+      );
+    }
+
+    if (error) {
+      return <ErrorText>{error}</ErrorText>;
+    }
+
+    if (isLoading && !results.length) {
+      return <ActivityIndicator size="large" color="#1E88E5" />;
+    }
+
+    return (
+      <FlatList
+        data={results}
+        keyExtractor={(item) => item.id}
+        showsVerticalScrollIndicator={false}
+        ItemSeparatorComponent={() => <Separator />}
+        renderItem={({ item }) => (
+          <WordCard padded>
+            <WordHeader>
+              <Typography variant="subtitle">{item.word}</Typography>
+              <MetaColumn>
+                {item.transcription ? (
+                  <Typography variant="caption">{item.transcription}</Typography>
+                ) : null}
+                {item.partOfSpeech ? (
+                  <Typography variant="caption">{item.partOfSpeech}</Typography>
+                ) : null}
+                {item.audioUrl ? (
+                  <AudioButton onPress={() => playAudio(`${item.id}-main`, item.audioUrl!)}>
+                    <AudioLabel variant="caption">
+                      {playingId === `${item.id}-main` ? '■ Стоп' : '▶︎ Слушать'}
+                    </AudioLabel>
+                  </AudioButton>
+                ) : null}
+              </MetaColumn>
+            </WordHeader>
+            {item.translations.length ? (
+              <TranslationsBlock>
+                {item.translations.map((translation, index) => (
+                  <TranslationRow key={`${item.id}-translation-${index}`}>
+                    <TranslationText>

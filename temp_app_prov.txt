@@ -1,0 +1,18 @@
+   1: import type { PropsWithChildren } from 'react';
+   2: import { GestureHandlerRootView } from 'react-native-gesture-handler';
+   3: import { SafeAreaProvider } from 'react-native-safe-area-context';
+   4: import { ThemeProvider } from 'styled-components/native';
+   5: 
+   6: import { lightTheme } from '@shared/theme';
+   7: 
+   8: import { ReduxProvider } from './ReduxProvider';
+   9: 
+  10: export const AppProviders = ({ children }: PropsWithChildren) => (
+  11:   <GestureHandlerRootView style={{ flex: 1 }}>
+  12:     <SafeAreaProvider>
+  13:       <ReduxProvider>
+  14:         <ThemeProvider theme={lightTheme}>{children}</ThemeProvider>
+  15:       </ReduxProvider>
+  16:     </SafeAreaProvider>
+  17:   </GestureHandlerRootView>
+  18: );

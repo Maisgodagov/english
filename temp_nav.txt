@@ -1,0 +1,99 @@
+   1: import { Ionicons } from '@expo/vector-icons';
+   2: import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+   3: import { NavigationContainer, DefaultTheme as NavigationDefaultTheme } from '@react-navigation/native';
+   4: import { createNativeStackNavigator } from '@react-navigation/native-stack';
+   5: import { useMemo } from 'react';
+   6: 
+   7: import { useAppSelector } from '@app/store/hooks';
+   8: import { AuthScreen } from '@pages/auth/AuthScreen';
+   9: import { CoursesScreen } from '@pages/courses/CoursesScreen';
+  10: import { DictionaryScreen } from '@pages/dictionary/DictionaryScreen';
+  11: import { HomeScreen } from '@pages/home/HomeScreen';
+  12: import { LandingScreen } from '@pages/landing/LandingScreen';
+  13: import { LessonScreen } from '@pages/lesson/LessonScreen';
+  14: import { ProfileScreen } from '@pages/profile/ProfileScreen';
+  15: 
+  16: export type RootStackParamList = {
+  17:   AuthFlow: undefined;
+  18:   Main: undefined;
+  19:   Lesson: { lessonId: string } | undefined;
+  20: };
+  21: 
+  22: export type AuthStackParamList = {
+  23:   Landing: undefined;
+  24:   SignIn: undefined;
+  25: };
+  26: 
+  27: export type MainTabParamList = {
+  28:   Home: undefined;
+  29:   Lessons: undefined;
+  30:   Vocabulary: undefined;
+  31:   Profile: undefined;
+  32: };
+  33: 
+  34: const RootStack = createNativeStackNavigator<RootStackParamList>();
+  35: const AuthStack = createNativeStackNavigator<AuthStackParamList>();
+  36: const Tabs = createBottomTabNavigator<MainTabParamList>();
+  37: 
+  38: const AuthStackScreen = () => (
+  39:   <AuthStack.Navigator screenOptions={{ headerShown: false }}>
+  40:     <AuthStack.Screen name="Landing" component={LandingScreen} />
+  41:     <AuthStack.Screen name="SignIn" component={AuthScreen} />
+  42:   </AuthStack.Navigator>
+  43: );
+  44: 
+  45: const TabNavigator = () => (
+  46:   <Tabs.Navigator
+  47:     screenOptions={({ route }) => ({
+  48:       headerShown: false,
+  49:       tabBarActiveTintColor: '#1E88E5',
+  50:       tabBarStyle: { borderTopWidth: 0 },
+  51:       tabBarIcon: ({ color, size }) => {
+  52:         const iconName =
+  53:           route.name === 'Home'
+  54:             ? 'home'
+  55:             : route.name === 'Lessons'
+  56:               ? 'book'
+  57:               : route.name === 'Vocabulary'
+  58:                 ? 'book-outline'
+  59:                 : 'person-circle';
+  60:         return <Ionicons name={iconName as keyof typeof Ionicons.glyphMap} size={size} color={color} />;
+  61:       },
+  62:     })}
+  63:   >
+  64:     <Tabs.Screen name="Home" component={HomeScreen} options={{ title: 'Главная' }} />
+  65:     <Tabs.Screen name="Lessons" component={CoursesScreen} options={{ title: 'Уроки' }} />
+  66:     <Tabs.Screen name="Vocabulary" component={DictionaryScreen} options={{ title: 'Словарь' }} />
+  67:     <Tabs.Screen name="Profile" component={ProfileScreen} options={{ title: 'Профиль' }} />
+  68:   </Tabs.Navigator>
+  69: );
+  70: 
+  71: const navigationTheme = {
+  72:   ...NavigationDefaultTheme,
+  73:   colors: {
+  74:     ...NavigationDefaultTheme.colors,
+  75:     background: 'transparent',
+  76:   },
+  77: };
+  78: 
+  79: export const RootNavigator = () => {
+  80:   const authStatus = useAppSelector((state) => state.auth.status);
+  81:   const isAuthenticated = useMemo(() => authStatus === 'authenticated', [authStatus]);
+  82: 
+  83:   return (
+  84:     <NavigationContainer theme={navigationTheme}>
+  85:       <RootStack.Navigator screenOptions={{ headerShown: false }}>
+  86:         {isAuthenticated ? (
+  87:           <RootStack.Screen name="Main" component={TabNavigator} />
+  88:         ) : (
+  89:           <RootStack.Screen name="AuthFlow" component={AuthStackScreen} />
+  90:         )}
+  91:         <RootStack.Screen
+  92:           name="Lesson"
+  93:           component={LessonScreen}
+  94:           options={{ headerShown: false, presentation: 'modal' }}
+  95:         />
+  96:       </RootStack.Navigator>
+  97:     </NavigationContainer>
+  98:   );
+  99: };

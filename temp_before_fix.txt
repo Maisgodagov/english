@@ -1,0 +1,380 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, FlatList, Animated, Dimensions, Easing } from 'react-native';
+import styled from 'styled-components/native';
+import { Audio as ExpoAudio } from 'expo-av';
+import { useNavigation } from '@react-navigation/native';
+
+import { useAppDispatch, useAppSelector } from '@app/store/hooks';
+import {
+  fetchUserDictionary,
+  removeUserDictionaryEntry,
+  selectDictionaryItems,
+  selectDictionaryStatus,
+} from '@features/dictionary/model/dictionarySlice';
+import { SurfaceCard, Typography } from '@shared/ui';
+import { addUserDictionaryEntry } from '@features/dictionary/model/dictionarySlice';
+
+const Screen = styled.View`
+  flex: 1;
+  background-color: ${({ theme }) => theme.colors.backgroundAlt};
+  padding: 64px 20px 20px;
+  gap: 20px;
+`;
+
+const TopRow = styled.View`
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+`;
+
+const PrimaryButton = styled.TouchableOpacity`
+  background-color: ${({ theme }) => theme.colors.primary};
+  border-radius: ${({ theme }) => theme.radius.md}px;
+  padding: 12px 16px;
+`;
+
+const ButtonLabel = styled(Typography)`
+  color: #ffffff;
+  font-weight: 600;
+`;
+
+const SearchPanel = styled.View`
+  position: absolute;
+  top: 64px;
+  left: 0;
+  right: 0;
+  padding: 16px 20px;
+  background-color: ${({ theme }) => theme.colors.surface};
+  border-bottom-left-radius: ${({ theme }) => theme.radius.lg}px;
+  border-bottom-right-radius: ${({ theme }) => theme.radius.lg}px;
+  gap: 12px;
+`;
+
+const SearchRow = styled.View`
+  flex-direction: row;
+  gap: 12px;
+`;
+
+const SearchInput = styled.TextInput`
+  flex: 1;
+  background-color: #ffffff;
+  border-radius: ${({ theme }) => theme.radius.md}px;
+  padding: 12px 14px;
+  font-size: 16px;
+  border-width: 1px;
+  border-color: ${({ theme }) => theme.colors.border};
+`;
+
+const Muted = styled(Typography)`
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+const Inline = styled.View`
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+`;
+
+const WordCard = styled(SurfaceCard)`
+  gap: 12px;
+`;
+
+const Row = styled.View`
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+`;
+
+const AudioButton = styled.TouchableOpacity`
+  background-color: rgba(30, 136, 229, 0.12);
+  border-radius: ${({ theme }) => theme.radius.sm}px;
+  padding: 6px 12px;
+`;
+
+const AudioLabel = styled(Typography)`
+  color: ${({ theme }) => theme.colors.primary};
+`;
+
+const SmallButton = styled.TouchableOpacity`
+  padding: 6px 10px;
+  border-radius: ${({ theme }) => theme.radius.sm}px;
+  background-color: ${({ theme }) => theme.colors.surfaceAlt};
+`;
+
+const SmallButtonLabel = styled(Typography)`
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const Separator = styled.View`
+  height: 16px;
+`;
+
+const EmptyState = styled(Typography)`
+  text-align: center;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+export const UserDictionaryScreen = () => {
+  const navigation = useNavigation();
+  const dispatch = useAppDispatch();
+  const profile = useAppSelector((s) => s.user.profile);
+  const items = useAppSelector(selectDictionaryItems);
+  const status = useAppSelector(selectDictionaryStatus);
+
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const soundRef = useRef<ExpoAudio.Sound | null>(null);
+
+  // Sliding search panel state
+  const panelHeight = Math.round(Dimensions.get('window').height * 0.5);
+  const slideY = useRef(new Animated.Value(-panelHeight)).current;
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [results, setResults] = useState<{ word: string; translation: string; partOfSpeech?: string; transcription?: string }[]>([]);
+  const [optimistic, setOptimistic] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (profile?.id) {
+      dispatch(fetchUserDictionary({ userId: profile.id }));
+    }
+  }, [dispatch, profile?.id]);
+
+  useEffect(() => {
+    return () => {
+      if (soundRef.current) {
+        soundRef.current.unloadAsync().catch(() => undefined);
+        soundRef.current = null;
+      }
+    };
+  }, []);
+
+  const playAudio = async (id: string, url: string) => {
+    try {
+      if (playingId === id && soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+        setPlayingId(null);
+        return;
+      }
+      if (soundRef.current) {
+        await soundRef.current.stopAsync().catch(() => undefined);
+        await soundRef.current.unloadAsync().catch(() => undefined);
+        soundRef.current = null;
+      }
+      const { sound } = await ExpoAudio.Sound.createAsync({ uri: url });
+      soundRef.current = sound;
+      setPlayingId(id);
+      await sound.playAsync();
+      sound.setOnPlaybackStatusUpdate((s) => {
+        if (!s.isLoaded) return;
+        if ((s as any).didJustFinish) {
+          setPlayingId((current) => (current === id ? null : current));
+          sound.unloadAsync().catch(() => undefined);
+          soundRef.current = null;
+        }
+      });
+    } catch {
+      Alert.alert('РќРµ СѓРґР°Р»РѕСЃСЊ РІРѕСЃРїСЂРѕРёР·РІРµСЃС‚Рё Р°СѓРґРёРѕ');
+      setPlayingId((current) => (current === id ? null : current));
+    }
+  };
+
+  const openSearch = () => {
+    setSearchOpen(true);
+    slideY.stopAnimation();
+    slideY.setValue(-panelHeight);
+    Animated.timing(slideY, {
+      toValue: 0,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  };
+
+  const closeSearch = () => {
+    Animated.timing(slideY, {
+      toValue: -panelHeight,
+      duration: 260,
+      easing: Easing.in(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) {
+        setSearchOpen(false);
+        setQuery('');
+        setResults([]);
+        setSearchError(null);
+        setSearchLoading(false);
+      }
+    });
+  };
+
+  const detectLang = (input: string) => {
+    const hasCyrillic = /[\p{Script=Cyrillic}]/u.test(input);
+    const hasLatin = /[A-Za-z]/.test(input);
+    if (hasCyrillic && !hasLatin) return 'ru-en';
+    return 'en-ru';
+  };
+
+  const submitSearch = async () => {
+    const text = query.trim();
+    if (!text) return;
+    const apiKey = process.env.EXPO_PUBLIC_YANDEX_DICT_KEY;
+    if (!apiKey) {
+      setSearchError('РќРµ РЅР°Р№РґРµРЅ РєР»СЋС‡ API. РЈРєР°Р¶РёС‚Рµ EXPO_PUBLIC_YANDEX_DICT_KEY.');
+      return;
+    }
+    setSearchLoading(true);
+    setSearchError(null);
+    try {
+      const lang = detectLang(text);
+      const params = new URLSearchParams({
+        key: apiKey,
+        lang,
+        text,
+      });
+      const url = `https://dictionary.yandex.net/api/v1/dicservice.json/lookup?${params.toString()}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(`РћС€РёР±РєР° Р·Р°РїСЂРѕСЃР°: ${res.status}`);
+      const data = (await res.json()) as { def?: Array<{ text?: string; ts?: string; pos?: string; tr?: Array<{ text?: string; pos?: string }> }>; };
+      const next: { word: string; translation: string; partOfSpeech?: string; transcription?: string }[] = [];
+      const defs = data.def ?? [];
+      defs.forEach((d) => {
+        const base = (d.text ?? text).trim();
+        (d.tr ?? []).forEach((t) => {
+          if (!t.text) return;
+          next.push({
+            word: base,
+            translation: t.text,
+            partOfSpeech: t.pos ?? d.pos ?? undefined,
+            transcription: d.ts ?? undefined,
+          });
+        });
+      });
+      setResults(next.slice(0, 20));
+    } catch (e) {
+      setSearchError(e instanceof Error ? e.message : 'РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ РїРѕРёСЃРє');
+      setResults([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const content = useMemo(() => {
+    if (status === 'loading') {
+      return <ActivityIndicator size="large" color="#1E88E5" />;
+    }
+    if (!items.length) {
+      return <EmptyState>Р’Р°С€ СЃР»РѕРІР°СЂСЊ РїСѓСЃС‚. РќР°Р№РґРёС‚Рµ СЃР»РѕРІРѕ Рё СЃРѕС…СЂР°РЅРёС‚Рµ РІ СЃР»РѕРІР°СЂСЊ.</EmptyState>;
+    }
+    return (
+      <FlatList
+        data={items}
+        keyExtractor={(item) => item.id}
+        showsVerticalScrollIndicator={false}
+        ItemSeparatorComponent={() => <Separator />}
+        renderItem={({ item }) => (
+          <WordCard padded>
+            <Row>
+              <Typography variant="subtitle">{item.word}</Typography>
+              {item.audioUrl ? (
+                <AudioButton onPress={() => playAudio(`${item.id}-saved`, item.audioUrl!)}>
+                  <AudioLabel variant="caption">{playingId === `${item.id}-saved` ? 'РЎС‚РѕРї' : 'РџСЂРѕСЃР»СѓС€Р°С‚СЊ'}</AudioLabel>
+                </AudioButton>
+              ) : null}
+            </Row>
+            {item.transcription ? <Typography variant="caption">{item.transcription}</Typography> : null}
+            {item.partOfSpeech ? <Typography variant="caption">{item.partOfSpeech}</Typography> : null}
+            <Row>
+              <Typography>вЂ” {item.translation}</Typography>
+              <SmallButton
+                onPress={() => {
+                  if (!profile?.id) return;
+                  dispatch(removeUserDictionaryEntry({ userId: profile.id, id: item.id }));
+                }}
+              >
+                <SmallButtonLabel variant="caption">РЈРґР°Р»РёС‚СЊ</SmallButtonLabel>
+              </SmallButton>
+            </Row>
+          </WordCard>
+        )}
+        contentContainerStyle={{ paddingBottom: 32 }}
+      />
+    );
+  }, [dispatch, items, playingId, profile?.id, status]);
+
+  return (
+    <Screen>
+      <TopRow>
+        <Typography variant="title">РњРѕР№ СЃР»РѕРІР°СЂСЊ</Typography>
+        <PrimaryButton onPress={openSearch}>
+          <ButtonLabel>Найти слово</ButtonLabel>
+        </PrimaryButton>
+      </TopRow>
+      {content}
+      <Animated.View
+        pointerEvents={searchOpen ? 'auto' : 'none'}
+        style={{ transform: [{ translateY: slideY }], height: panelHeight, zIndex: 10 }}
+      >
+        <SearchPanel>
+          <Inline>
+            <Typography variant="subtitle">Поиск слова</Typography>
+            <SmallButton onPress={closeSearch}>
+              <SmallButtonLabel variant="caption">Закрыть</SmallButtonLabel>
+            </SmallButton>
+          </Inline>
+          <SearchRow>
+            <SearchInput
+              placeholder="Введите слово на русском или английском"
+              placeholderTextColor="#9CA3AF"
+              value={query}
+              onChangeText={setQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              onSubmitEditing={}
+            />
+            <PrimaryButton onPress={submitSearch}>
+              <ButtonLabel>Искать</ButtonLabel>
+            </PrimaryButton>
+          </SearchRow>
+          {searchError ? <Typography variant="caption" style={{ color: '#D32F2F' }}>{searchError}</Typography> : null}
+{searchLoading && !results.length ? <ActivityIndicator size="small" color="#1E88E5" /> : null}
+{!searchLoading && !results.length ? (
+  <Muted variant="caption">Начните поиск, чтобы увидеть переводы</Muted>
+) : null}
+{!!results.length && (
+  <FlatList
+    data={results}
+    keyExtractor={(it, idx) => `${it.word}-${it.translation}-${idx}`}
+    ItemSeparatorComponent={() => <Separator />}
+    renderItem={({ item }) => {
+      const key = `${item.word.toLowerCase()}|${item.translation.toLowerCase()}`;
+      const inDict =
+        optimistic.has(key) ||
+        items.some((s) => s.word.toLowerCase() === item.word.toLowerCase() && s.translation.toLowerCase() === item.translation.toLowerCase());
+      return (
+        <WordCard padded>
+          <Row>
+            <Typography variant="subtitle">{item.word}</Typography>
+            {item.transcription ? (<Typography variant="caption">{item.transcription}</Typography>) : null}
+          </Row>
+          <Row>
+            <Typography>
+              — {item.translation}{item.partOfSpeech ? ` (${item.partOfSpeech})` : ""}
+            </Typography>
+            {inDict ? (
+              <SmallButtonLabel variant="caption">Добавлено</SmallButtonLabel>
+            ) : (
+              <SmallButton onPress={() => {
+                if (!profile?.id) {
+                  Alert.alert("Требуется вход", "Войдите, чтобы сохранить слово в словарь");
+                  return;
+                }
+                setOptimistic((prev) => { const next = new Set(prev); next.add(key); return next; });
+                dispatch(addUserDictionaryEntry({ userId: profile.id, entry: {
+                  word: item.word, translation: item.translation, transcription: item.transcription, partOfSpeech: item.partOfSpeech, sourceLang: "en", targetLang: "ru"
+                } }) as any);
+              }}>

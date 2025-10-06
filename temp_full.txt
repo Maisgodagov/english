@@ -1,0 +1,775 @@
+   1: import { Audio as ExpoAudio } from 'expo-av';
+   2: import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+   3: import { ActivityIndicator, Alert, FlatList, Platform } from 'react-native';
+   4: import styled from 'styled-components/native';
+   5: 
+   6: import { SurfaceCard, Typography } from '@shared/ui';
+   7: import { useNavigation } from '@react-navigation/native';
+   8: import { useAppDispatch, useAppSelector } from '@app/store/hooks';
+   9: import {
+  10:   addUserDictionaryEntry,
+  11:   fetchUserDictionary,
+  12:   removeUserDictionaryEntry,
+  13:   selectDictionaryItems,
+  14:   selectDictionaryStatus,
+  15: } from '@features/dictionary/model/dictionarySlice';
+  16: 
+  17: type AudioData = {
+  18:   audio?: string;
+  19:   transcription?: string;
+  20: };
+  21: 
+  22: interface YandexSynonym {
+  23:   text: string;
+  24: }
+  25: 
+  26: interface YandexExampleTranslation {
+  27:   text: string;
+  28: }
+  29: 
+  30: interface YandexExample {
+  31:   text: string;
+  32:   tr?: YandexExampleTranslation[];
+  33: }
+  34: 
+  35: interface YandexTranslation {
+  36:   text?: string;
+  37:   pos?: string;
+  38:   syn?: YandexSynonym[];
+  39:   mean?: { text: string }[];
+  40:   ex?: YandexExample[];
+  41: }
+  42: 
+  43: interface YandexDefinition {
+  44:   text?: string;
+  45:   pos?: string;
+  46:   ts?: string;
+  47:   tr?: YandexTranslation[];
+  48: }
+  49: 
+  50: interface YandexResponse {
+  51:   def?: YandexDefinition[];
+  52: }
+  53: 
+  54: interface FreeDictPhonetic {
+  55:   text?: string;
+  56:   audio?: string;
+  57: }
+  58: 
+  59: interface FreeDictEntry {
+  60:   word: string;
+  61:   phonetics?: FreeDictPhonetic[];
+  62: }
+  63: 
+  64: interface TranslationItem {
+  65:   text: string;
+  66:   partOfSpeech?: string;
+  67:   audioUrl?: string;
+  68: }
+  69: 
+  70: interface DictionaryEntry {
+  71:   id: string;
+  72:   word: string;
+  73:   transcription?: string;
+  74:   partOfSpeech?: string;
+  75:   translations: TranslationItem[];
+  76:   synonyms: string[];
+  77:   examples: string[];
+  78:   audioUrl?: string;
+  79: }
+  80: 
+  81: const Screen = styled.View`
+  82:   flex: 1;
+  83:   background-color: ${({ theme }) => theme.colors.backgroundAlt};
+  84:   padding: 64px 20px 20px;
+  85:   gap: 20px;
+  86: `;
+  87: 
+  88: const SearchRow = styled.View`
+  89:   flex-direction: row;
+  90:   gap: 12px;
+  91: `;
+  92: 
+  93: const SearchBox = styled.TextInput`
+  94:   flex: 1;
+  95:   background-color: #ffffff;
+  96:   border-radius: ${({ theme }) => theme.radius.md}px;
+  97:   padding: 14px 18px;
+  98:   font-size: 16px;
+  99:   border-width: 1px;
+ 100:   border-color: ${({ theme }) => theme.colors.border};
+ 101: `;
+ 102: 
+ 103: const ActionButton = styled.TouchableOpacity`
+ 104:   background-color: ${({ theme }) => theme.colors.primary};
+ 105:   border-radius: ${({ theme }) => theme.radius.md}px;
+ 106:   padding: 14px 20px;
+ 107:   align-items: center;
+ 108:   justify-content: center;
+ 109:   opacity: ${({ disabled }) => (disabled ? 0.5 : 1)};
+ 110: `;
+ 111: 
+ 112: const ActionLabel = styled(Typography)`
+ 113:   color: #ffffff;
+ 114:   font-weight: 600;
+ 115: `;
+ 116: 
+ 117: const ClearButton = styled.TouchableOpacity`
+ 118:   background-color: ${({ theme }) => theme.colors.surfaceAlt};
+ 119:   border-radius: ${({ theme }) => theme.radius.md}px;
+ 120:   padding: 14px 16px;
+ 121:   align-items: center;
+ 122:   justify-content: center;
+ 123: `;
+ 124: 
+ 125: const ClearLabel = styled(Typography)`
+ 126:   color: ${({ theme }) => theme.colors.textSecondary};
+ 127: `;
+ 128: 
+ 129: const WordCard = styled(SurfaceCard)`
+ 130:   gap: 12px;
+ 131: `;
+ 132: 
+ 133: const WordHeader = styled.View`
+ 134:   flex-direction: row;
+ 135:   justify-content: space-between;
+ 136:   align-items: flex-start;
+ 137:   gap: 12px;
+ 138: `;
+ 139: 
+ 140: const MetaColumn = styled.View`
+ 141:   gap: 6px;
+ 142:   align-items: flex-end;
+ 143: `;
+ 144: 
+ 145: const TranslationsBlock = styled.View`
+ 146:   gap: 8px;
+ 147: `;
+ 148: 
+ 149: const TranslationRow = styled.View`
+ 150:   flex-direction: row;
+ 151:   align-items: center;
+ 152:   gap: 8px;
+ 153: `;
+ 154: 
+ 155: const TranslationText = styled(Typography)`
+ 156:   flex: 1;
+ 157: `;
+ 158: 
+ 159: const SynonymsText = styled(Typography)`
+ 160:   color: ${({ theme }) => theme.colors.textSecondary};
+ 161: `;
+ 162: 
+ 163: const ExampleText = styled(Typography)`
+ 164:   color: ${({ theme }) => theme.colors.textSecondary};
+ 165:   font-style: italic;
+ 166: `;
+ 167: 
+ 168: const AudioButton = styled.TouchableOpacity`
+ 169:   background-color: rgba(30, 136, 229, 0.12);
+ 170:   border-radius: ${({ theme }) => theme.radius.sm}px;
+ 171:   padding: 6px 12px;
+ 172: `;
+ 173: 
+ 174: const AudioLabel = styled(Typography)`
+ 175:   color: ${({ theme }) => theme.colors.primary};
+ 176: `;
+ 177: 
+ 178: const Separator = styled.View`
+ 179:   height: 16px;
+ 180: `;
+ 181: 
+ 182: const EmptyState = styled(Typography)`
+ 183:   text-align: center;
+ 184:   color: ${({ theme }) => theme.colors.textSecondary};
+ 185: `;
+ 186: 
+ 187: const ErrorText = styled(Typography)`
+ 188:   color: ${({ theme }) => theme.colors.danger};
+ 189: `;
+ 190: 
+ 191: const RowActions = styled.View`
+ 192:   flex-direction: row;
+ 193:   gap: 8px;
+ 194: `;
+ 195: 
+ 196: const SmallButton = styled.TouchableOpacity`
+ 197:   padding: 6px 10px;
+ 198:   border-radius: ${({ theme }) => theme.radius.sm}px;
+ 199:   background-color: ${({ theme }) => theme.colors.surfaceAlt};
+ 200: `;
+ 201: 
+ 202: const SmallButtonLabel = styled(Typography)`
+ 203:   color: ${({ theme }) => theme.colors.text};
+ 204: `;
+ 205: 
+ 206: const YANDEX_URL = 'https://dictionary.yandex.net/api/v1/dicservice.json/lookup';
+ 207: const FREEDICT_URL = 'https://api.dictionaryapi.dev/api/v2/entries';
+ 208: const MORPHO_FLAG = 0x0004;
+ 209: 
+ 210: const normalizeList = (items: (string | undefined)[]): string[] => {
+ 211:   const cleaned = items
+ 212:     .map((item) => item?.trim())
+ 213:     .filter((item): item is string => Boolean(item));
+ 214:   return Array.from(new Set(cleaned));
+ 215: };
+ 216: 
+ 217: const extractExamples = (translations: YandexTranslation[]): string[] => {
+ 218:   const collected: string[] = [];
+ 219:   translations.forEach((translation) => {
+ 220:     translation.ex?.forEach((example) => {
+ 221:       const base = example.text?.trim();
+ 222:       const sampleTranslations = example.tr?.map((tr) => tr.text?.trim()).filter(Boolean) ?? [];
+ 223:       if (base && sampleTranslations.length) {
+ 224:         collected.push(`${base} — ${sampleTranslations.join(', ')}`);
+ 225:       } else if (base) {
+ 226:         collected.push(base);
+ 227:       }
+ 228:     });
+ 229:   });
+ 230:   return normalizeList(collected);
+ 231: };
+ 232: 
+ 233: const toLower = (value: string) => value.trim().toLowerCase();
+ 234: 
+ 235: const detectLangDirection = (input: string) => {
+ 236:   const hasCyrillic = /[\p{Script=Cyrillic}]/u.test(input);
+ 237:   const hasLatin = /[A-Za-z]/.test(input);
+ 238:   if (hasCyrillic && !hasLatin) {
+ 239:     return { lang: 'ru-en', dictionaryWord: input };
+ 240:   }
+ 241:   return { lang: 'en-ru', dictionaryWord: input };
+ 242: };
+ 243: 
+ 244: export const DictionaryScreen = () => {
+ 245:   const navigation = useNavigation<any>();
+ 246:   const dispatch = useAppDispatch();
+ 247:   const profile = useAppSelector((state) => state.user.profile);
+ 248:   const savedItems = useAppSelector(selectDictionaryItems);
+ 249:   const savedStatus = useAppSelector(selectDictionaryStatus);
+ 250:   const [query, setQuery] = useState('');
+ 251:   const [searchTerm, setSearchTerm] = useState('');
+ 252:   const [results, setResults] = useState<DictionaryEntry[]>([]);
+ 253:   const [isLoading, setIsLoading] = useState(false);
+ 254:   const [error, setError] = useState<string | null>(null);
+ 255:   const [playingId, setPlayingId] = useState<string | null>(null);
+ 256:   const [optimisticSaved, setOptimisticSaved] = useState<Set<string>>(new Set());
+ 257: 
+ 258:   const apiKey = process.env.EXPO_PUBLIC_YANDEX_DICT_KEY;
+ 259:   const audioCacheRef = useRef<Map<string, AudioData | null>>(new Map());
+ 260:   const soundRef = useRef<ExpoAudio.Sound | null>(null);
+ 261:   const htmlAudioRef = useRef<HTMLAudioElement | null>(null);
+ 262: 
+ 263:   // Load user's saved dictionary on mount and when user changes
+ 264:   useEffect(() => {
+ 265:     if (profile?.id) {
+ 266:       dispatch(fetchUserDictionary({ userId: profile.id }));
+ 267:     }
+ 268:   }, [dispatch, profile?.id]);
+ 269: 
+ 270:   useEffect(() => {
+ 271:     return () => {
+ 272:       if (soundRef.current) {
+ 273:         soundRef.current.unloadAsync().catch(() => undefined);
+ 274:         soundRef.current = null;
+ 275:       }
+ 276:       if (htmlAudioRef.current) {
+ 277:         htmlAudioRef.current.pause();
+ 278:         htmlAudioRef.current = null;
+ 279:       }
+ 280:     };
+ 281:   }, []);
+ 282: 
+ 283:   const playAudio = useCallback(
+ 284:     async (id: string, url: string) => {
+ 285:       try {
+ 286:         if (Platform.OS === 'web') {
+ 287:           if (playingId === id && htmlAudioRef.current) {
+ 288:             htmlAudioRef.current.pause();
+ 289:             htmlAudioRef.current.currentTime = 0;
+ 290:             htmlAudioRef.current = null;
+ 291:             setPlayingId(null);
+ 292:             return;
+ 293:           }
+ 294: 
+ 295:           if (htmlAudioRef.current) {
+ 296:             htmlAudioRef.current.pause();
+ 297:             htmlAudioRef.current = null;
+ 298:           }
+ 299: 
+ 300:           const audioElement = new window.Audio(url);
+ 301:           htmlAudioRef.current = audioElement;
+ 302:           setPlayingId(id);
+ 303: 
+ 304:           audioElement.onended = () => {
+ 305:             setPlayingId((current) => (current === id ? null : current));
+ 306:             htmlAudioRef.current = null;
+ 307:           };
+ 308: 
+ 309:           audioElement.onerror = () => {
+ 310:             Alert.alert('Не удалось воспроизвести аудио');
+ 311:             setPlayingId((current) => (current === id ? null : current));
+ 312:             htmlAudioRef.current = null;
+ 313:           };
+ 314: 
+ 315:           await audioElement.play().catch(() => {
+ 316:             Alert.alert('Не удалось воспроизвести аудио');
+ 317:             setPlayingId((current) => (current === id ? null : current));
+ 318:             htmlAudioRef.current = null;
+ 319:           });
+ 320:           return;
+ 321:         }
+ 322: 
+ 323:         if (playingId === id && soundRef.current) {
+ 324:           await soundRef.current.stopAsync();
+ 325:           await soundRef.current.unloadAsync();
+ 326:           soundRef.current = null;
+ 327:           setPlayingId(null);
+ 328:           return;
+ 329:         }
+ 330: 
+ 331:         if (soundRef.current) {
+ 332:           await soundRef.current.unloadAsync();
+ 333:           soundRef.current = null;
+ 334:         }
+ 335: 
+ 336:         const { sound } = await ExpoAudio.Sound.createAsync({ uri: url });
+ 337:         soundRef.current = sound;
+ 338:         setPlayingId(id);
+ 339: 
+ 340:         await sound.playAsync();
+ 341: 
+ 342:         sound.setOnPlaybackStatusUpdate((status) => {
+ 343:           if (!status.isLoaded) {
+ 344:             return;
+ 345:           }
+ 346:           if (status.didJustFinish || !status.isPlaying) {
+ 347:             setPlayingId((current) => (current === id ? null : current));
+ 348:             sound.unloadAsync().finally(() => {
+ 349:               if (soundRef.current === sound) {
+ 350:                 soundRef.current = null;
+ 351:               }
+ 352:             });
+ 353:           }
+ 354:         });
+ 355:       } catch (err) {
+ 356:         console.error(err);
+ 357:         Alert.alert('Не удалось воспроизвести аудио');
+ 358:       }
+ 359:     },
+ 360:     [playingId],
+ 361:   );
+ 362: 
+ 363:   const submitSearch = useCallback(() => {
+ 364:     setSearchTerm(query.trim());
+ 365:   }, [query]);
+ 366:   const onClear = useCallback(() => {
+ 367:     setQuery('');
+ 368:     setSearchTerm('');
+ 369:     setResults([]);
+ 370:     setError(null);
+ 371:     setIsLoading(false);
+ 372:     try {
+ 373:       (navigation as any).navigate('UserDictionary');
+ 374:     } catch {}
+ 375:   }, [navigation]);
+ 376: 
+ 377:   useEffect(() => {
+ 378:     if (!searchTerm) {
+ 379:       setResults([]);
+ 380:       setError(null);
+ 381:       return;
+ 382:     }
+ 383: 
+ 384:     if (!apiKey) {
+ 385:       setError('Не задан ключ API Яндекса. Добавьте EXPO_PUBLIC_YANDEX_DICT_KEY в .env.');
+ 386:       setResults([]);
+ 387:       return;
+ 388:     }
+ 389: 
+ 390:     const { lang, dictionaryWord } = detectLangDirection(searchTerm);
+ 391: 
+ 392:     let isCancelled = false;
+ 393:     const controller = new AbortController();
+ 394: 
+ 395:     const getAudioData = async (word: string): Promise<AudioData | null> => {
+ 396:       const normalized = toLower(word);
+ 397:       if (!normalized) {
+ 398:         return null;
+ 399:       }
+ 400:       const cache = audioCacheRef.current;
+ 401:       if (cache.has(normalized)) {
+ 402:         return cache.get(normalized) ?? null;
+ 403:       }
+ 404:       try {
+ 405:         const response = await fetch(`${FREEDICT_URL}/en/${encodeURIComponent(normalized)}`);
+ 406:         if (!response.ok) {
+ 407:           cache.set(normalized, null);
+ 408:           return null;
+ 409:         }
+ 410:         const data: FreeDictEntry[] = await response.json();
+ 411:         const entry = data?.[0];
+ 412:         const audio = entry?.phonetics?.find((phonetic) => phonetic.audio)?.audio;
+ 413:         const transcription = entry?.phonetics?.find((phonetic) => phonetic.text)?.text;
+ 414:         const audioData: AudioData = {};
+ 415:         if (audio) {
+ 416:           audioData.audio = audio;
+ 417:         }
+ 418:         if (transcription) {
+ 419:           audioData.transcription = transcription;
+ 420:         }
+ 421:         cache.set(normalized, audioData);
+ 422:         return audioData;
+ 423:       } catch (err) {
+ 424:         console.error(err);
+ 425:         audioCacheRef.current.set(normalized, null);
+ 426:         return null;
+ 427:       }
+ 428:     };
+ 429: 
+ 430:     const fetchData = async () => {
+ 431:       setIsLoading(true);
+ 432:       setError(null);
+ 433:       try {
+ 434:         const params = new URLSearchParams({
+ 435:           key: apiKey,
+ 436:           lang,
+ 437:           text: dictionaryWord,
+ 438:           ui: 'ru',
+ 439:           flags: MORPHO_FLAG.toString(),
+ 440:         });
+ 441: 
+ 442:         const yandexResponse = await fetch(`${YANDEX_URL}?${params.toString()}`, {
+ 443:           signal: controller.signal,
+ 444:         });
+ 445: 
+ 446:         if (!yandexResponse.ok) {
+ 447:           if (yandexResponse.status === 404) {
+ 448:             setResults([]);
+ 449:             setError('Слово не найдено. Попробуйте другой запрос.');
+ 450:             return;
+ 451:           }
+ 452:           if (yandexResponse.status === 401) {
+ 453:             setError('Неверный API ключ для Яндекс.Словаря.');
+ 454:             setResults([]);
+ 455:             return;
+ 456:           }
+ 457:           throw new Error(`Ошибка словаря ${yandexResponse.status}`);
+ 458:         }
+ 459: 
+ 460:         const yandexData: YandexResponse = await yandexResponse.json();
+ 461:         if (isCancelled) return;
+ 462: 
+ 463:         if (!yandexData.def || yandexData.def.length === 0) {
+ 464:           setResults([]);
+ 465:           setError('Перевод не найден. Попробуйте другой запрос.');
+ 466:           return;
+ 467:         }
+ 468: 
+ 469:         const baseAudioMap = new Map<string, AudioData | null>();
+ 470:         if (lang === 'en-ru') {
+ 471:           const baseWords = new Set<string>();
+ 472:           yandexData.def.forEach((definition) => {
+ 473:             const base = definition.text?.trim();
+ 474:             if (base) {
+ 475:               baseWords.add(toLower(base));
+ 476:             }
+ 477:           });
+ 478:           if (baseWords.size === 0) {
+ 479:             baseWords.add(toLower(dictionaryWord));
+ 480:           }
+ 481:           await Promise.all(
+ 482:             Array.from(baseWords).map(async (wordLower) => {
+ 483:               const audioData = await getAudioData(wordLower);
+ 484:               baseAudioMap.set(wordLower, audioData);
+ 485:             }),
+ 486:           );
+ 487:         }
+ 488: 
+ 489:         const translationAudioMap = new Map<string, AudioData | null>();
+ 490:         if (lang === 'ru-en') {
+ 491:           const uniqueTranslations = new Set<string>();
+ 492:           yandexData.def.forEach((definition) => {
+ 493:             definition.tr?.forEach((translation) => {
+ 494:               if (translation.text) {
+ 495:                 uniqueTranslations.add(toLower(translation.text));
+ 496:               }
+ 497:             });
+ 498:           });
+ 499: 
+ 500:           await Promise.all(
+ 501:             Array.from(uniqueTranslations).map(async (wordLower) => {
+ 502:               const audioData = await getAudioData(wordLower);
+ 503:               translationAudioMap.set(wordLower, audioData);
+ 504:             }),
+ 505:           );
+ 506:         }
+ 507: 
+ 508:         type AggregatedEntry = {
+ 509:           entry: DictionaryEntry;
+ 510:           translationSet: Set<string>;
+ 511:           synonymSet: Set<string>;
+ 512:           exampleSet: Set<string>;
+ 513:         };
+ 514: 
+ 515:         const entryMap = new Map<string, AggregatedEntry>();
+ 516: 
+ 517:         const ensureEntry = (definition: YandexDefinition): AggregatedEntry => {
+ 518:           const baseWord = definition.text?.trim() || dictionaryWord;
+ 519:           const key = toLower(baseWord);
+ 520:           let aggregated = entryMap.get(key);
+ 521:           if (!aggregated) {
+ 522:             aggregated = {
+ 523:               entry: {
+ 524:                 id: `${key}-${entryMap.size}`,
+ 525:                 word: baseWord,
+ 526:                 transcription: definition.ts ? `[${definition.ts}]` : undefined,
+ 527:                 partOfSpeech: definition.pos,
+ 528:                 translations: [],
+ 529:                 synonyms: [],
+ 530:                 examples: [],
+ 531:                 audioUrl: undefined,
+ 532:               },
+ 533:               translationSet: new Set<string>(),
+ 534:               synonymSet: new Set<string>(),
+ 535:               exampleSet: new Set<string>(),
+ 536:             };
+ 537:             entryMap.set(key, aggregated);
+ 538:           } else {
+ 539:             if (!aggregated.entry.transcription && definition.ts) {
+ 540:               aggregated.entry.transcription = `[${definition.ts}]`;
+ 541:             }
+ 542:             if (!aggregated.entry.partOfSpeech && definition.pos) {
+ 543:               aggregated.entry.partOfSpeech = definition.pos;
+ 544:             }
+ 545:           }
+ 546:           return aggregated;
+ 547:         };
+ 548: 
+ 549:         yandexData.def.forEach((definition) => {
+ 550:           const aggregated = ensureEntry(definition);
+ 551:           const translations = definition.tr ?? [];
+ 552: 
+ 553:           translations.forEach((translation) => {
+ 554:             const text = translation.text?.trim();
+ 555:             if (!text) {
+ 556:               return;
+ 557:             }
+ 558:             const lowerText = toLower(text);
+ 559:             if (!aggregated.translationSet.has(lowerText)) {
+ 560:               const audioData = lang === 'ru-en' ? translationAudioMap.get(lowerText) ?? undefined : undefined;
+ 561:               aggregated.entry.translations.push({
+ 562:                 text,
+ 563:                 partOfSpeech: translation.pos,
+ 564:                 audioUrl: audioData?.audio,
+ 565:               });
+ 566:               aggregated.translationSet.add(lowerText);
+ 567:             }
+ 568: 
+ 569:             translation.syn?.forEach((synonym) => {
+ 570:               const value = synonym.text?.trim();
+ 571:               if (!value) return;
+ 572:               const lowerValue = toLower(value);
+ 573:               if (!aggregated.synonymSet.has(lowerValue)) {
+ 574:                 aggregated.entry.synonyms.push(value);
+ 575:                 aggregated.synonymSet.add(lowerValue);
+ 576:               }
+ 577:             });
+ 578: 
+ 579:             extractExamples([translation]).forEach((example) => {
+ 580:               const lowerExample = example.toLowerCase();
+ 581:               if (!aggregated.exampleSet.has(lowerExample)) {
+ 582:                 aggregated.entry.examples.push(example);
+ 583:                 aggregated.exampleSet.add(lowerExample);
+ 584:               }
+ 585:             });
+ 586:           });
+ 587:         });
+ 588: 
+ 589:         const finalEntries = Array.from(entryMap.entries()).map(([key, aggregated]) => {
+ 590:           if (lang === 'en-ru') {
+ 591:             const audioData = baseAudioMap.get(key);
+ 592:             if (audioData) {
+ 593:               if (audioData.audio) {
+ 594:                 aggregated.entry.audioUrl = audioData.audio;
+ 595:               }
+ 596:               if (!aggregated.entry.transcription && audioData.transcription) {
+ 597:                 aggregated.entry.transcription = audioData.transcription;
+ 598:               }
+ 599:             }
+ 600:           }
+ 601: 
+ 602:           aggregated.entry.translations.sort((a, b) => a.text.localeCompare(b.text, 'ru'));
+ 603:           aggregated.entry.synonyms.sort((a, b) => a.localeCompare(b, 'ru'));
+ 604:           aggregated.entry.examples.sort((a, b) => a.localeCompare(b, 'ru'));
+ 605: 
+ 606:           return aggregated.entry;
+ 607:         });
+ 608: 
+ 609:         setResults(finalEntries);
+ 610:       } catch (err) {
+ 611:         if (isCancelled || controller.signal.aborted) return;
+ 612:         console.error(err);
+ 613:         setError(err instanceof Error ? err.message : 'Не удалось получить данные словаря');
+ 614:         setResults([]);
+ 615:       } finally {
+ 616:         if (!isCancelled) {
+ 617:           setIsLoading(false);
+ 618:         }
+ 619:       }
+ 620:     };
+ 621: 
+ 622:     fetchData();
+ 623: 
+ 624:     return () => {
+ 625:       isCancelled = true;
+ 626:       controller.abort();
+ 627:     };
+ 628:   }, [apiKey, searchTerm]);
+ 629: 
+ 630:   const content = useMemo(() => {
+ 631:     if (!searchTerm && !isLoading) {
+ 632:       return (
+ 633:         <EmptyState>
+ 634:           Введите слово на русском или английском, чтобы посмотреть перевод и произношение.
+ 635:         </EmptyState>
+ 636:       );
+ 637:     }
+ 638: 
+ 639:     if (error) {
+ 640:       return <ErrorText>{error}</ErrorText>;
+ 641:     }
+ 642: 
+ 643:     if (isLoading && !results.length) {
+ 644:       return <ActivityIndicator size="large" color="#1E88E5" />;
+ 645:     }
+ 646: 
+ 647:     return (
+ 648:       <FlatList
+ 649:         data={results}
+ 650:         keyExtractor={(item) => item.id}
+ 651:         showsVerticalScrollIndicator={false}
+ 652:         ItemSeparatorComponent={() => <Separator />}
+ 653:         renderItem={({ item }) => (
+ 654:           <WordCard padded>
+ 655:             <WordHeader>
+ 656:               <Typography variant="subtitle">{item.word}</Typography>
+ 657:               <MetaColumn>
+ 658:                 {item.transcription ? (
+ 659:                   <Typography variant="caption">{item.transcription}</Typography>
+ 660:                 ) : null}
+ 661:                 {item.partOfSpeech ? (
+ 662:                   <Typography variant="caption">{item.partOfSpeech}</Typography>
+ 663:                 ) : null}
+ 664:                 {item.audioUrl ? (
+ 665:                   <AudioButton onPress={() => playAudio(`${item.id}-main`, item.audioUrl!)}>
+ 666:                     <AudioLabel variant="caption">
+ 667:                       {playingId === `${item.id}-main` ? '■ Стоп' : '▶︎ Слушать'}
+ 668:                     </AudioLabel>
+ 669:                   </AudioButton>
+ 670:                 ) : null}
+ 671:               </MetaColumn>
+ 672:             </WordHeader>
+ 673:             {item.translations.length ? (
+ 674:               <TranslationsBlock>
+ 675:                 {item.translations.map((translation, index) => (
+ 676:                   <TranslationRow key={`${item.id}-translation-${index}`}>
+ 677:                     <TranslationText>
+ 678:                       • {translation.text}
+ 679:                       {translation.partOfSpeech ? ` (${translation.partOfSpeech})` : ''}
+ 680:                     </TranslationText>
+ 681:                     {translation.audioUrl ? (
+ 682:                       <AudioButton
+ 683:                         onPress={() => playAudio(`${item.id}-translation-${index}`, translation.audioUrl!)}
+ 684:                       >
+ 685:                         <AudioLabel variant="caption">
+ 686:                           {playingId === `${item.id}-translation-${index}` ? '■' : '▶︎'}
+ 687:                         </AudioLabel>
+ 688:                       </AudioButton>
+ 689:                     ) : null}
+ 690:                     {(savedItems.some(
+ 691:                       (s) =>
+ 692:                         s.word.toLowerCase() === item.word.toLowerCase() &&
+ 693:                         s.translation.toLowerCase() === (translation.text ?? '').toLowerCase(),
+ 694:                     ) || optimisticSaved.has(`${item.word.toLowerCase()}|${(translation.text ?? '').toLowerCase()}`)) ? (
+ 695:                       <SmallButtonLabel variant="caption">Добавлено в словарь</SmallButtonLabel>
+ 696:                     ) : (
+ 697:                       <SmallButton
+ 698:                         onPress={() => {
+ 699:                           if (!profile?.id) {
+ 700:                             Alert.alert('Требуется вход', 'Войдите, чтобы сохранить слово в словарь');
+ 701:                             return;
+ 702:                           }
+ 703:                           const k = `${item.word.toLowerCase()}|${(translation.text ?? '').toLowerCase()}`;
+ 704:                           setOptimisticSaved((prev) => {
+ 705:                             const next = new Set(prev);
+ 706:                             next.add(k);
+ 707:                             return next;
+ 708:                           });
+ 709:                           dispatch(
+ 710:                             addUserDictionaryEntry({
+ 711:                               userId: profile.id,
+ 712:                               entry: {
+ 713:                                 word: item.word,
+ 714:                                 translation: translation.text,
+ 715:                                 transcription: item.transcription,
+ 716:                                 partOfSpeech: translation.partOfSpeech ?? item.partOfSpeech,
+ 717:                                 audioUrl: translation.audioUrl ?? item.audioUrl,
+ 718:                                 sourceLang: 'en',
+ 719:                                 targetLang: 'ru',
+ 720:                               },
+ 721:                             }),
+ 722:                           );
+ 723:                         }}
+ 724:                       >
+ 725:                         <SmallButtonLabel variant="caption">Сохранить</SmallButtonLabel>
+ 726:                       </SmallButton>
+ 727:                     )}
+ 728:                   </TranslationRow>
+ 729:                 ))}
+ 730:               </TranslationsBlock>
+ 731:             ) : null}
+ 732:             {item.synonyms.length ? (
+ 733:               <SynonymsText variant="caption">
+ 734:                 Синонимы: {item.synonyms.join(', ')}
+ 735:               </SynonymsText>
+ 736:             ) : null}
+ 737:             {item.examples.length ? (
+ 738:               <TranslationsBlock>
+ 739:                 {item.examples.map((example, index) => (
+ 740:                   <ExampleText key={`${item.id}-example-${index}`}>{example}</ExampleText>
+ 741:                 ))}
+ 742:               </TranslationsBlock>
+ 743:             ) : null}
+ 744:           </WordCard>
+ 745:         )}
+ 746:         contentContainerStyle={{ paddingBottom: 32 }}
+ 747:       />
+ 748:     );
+ 749:   }, [error, isLoading, playAudio, playingId, results, searchTerm]);
+ 750: 
+ 751:   return (
+ 752:     <Screen>
+ 753:       <Typography variant="title">Словарь</Typography>
+ 754:       <SearchRow>
+ 755:         <SearchBox
+ 756:           placeholder="Введите слово на русском или английском"
+ 757:           placeholderTextColor="#9CA3AF"
+ 758:           value={query}
+ 759:           onChangeText={setQuery}
+ 760:           autoCapitalize="none"
+ 761:           autoCorrect={false}
+ 762:           returnKeyType="search"
+ 763:           onSubmitEditing={submitSearch}
+ 764:         />
+ 765:         <ClearButton onPress={onClear}>
+ 766:           <ClearLabel>×</ClearLabel>
+ 767:         </ClearButton>
+ 768:         <ActionButton onPress={submitSearch} disabled={!query.trim() || isLoading}>
+ 769:           <ActionLabel>Найти</ActionLabel>
+ 770:         </ActionButton>
+ 771:       </SearchRow>
+ 772:       {content}
+ 773:     </Screen>
+ 774:   );
+ 775: };

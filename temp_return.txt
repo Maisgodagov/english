@@ -1,0 +1,21 @@
+                      {translation.partOfSpeech ? ` (${translation.partOfSpeech})` : ''}
+                    </TranslationText>
+                    {translation.audioUrl ? (
+                      <AudioButton
+                        onPress={() => playAudio(`${item.id}-translation-${index}`, translation.audioUrl!)}
+                      >
+                        <AudioLabel variant="caption">
+                          {playingId === `${item.id}-translation-${index}` ? '■' : '▶︎'}
+                        </AudioLabel>
+                      </AudioButton>
+                    ) : null}
+                  </TranslationRow>
+                ))}
+              </TranslationsBlock>
+            ) : null}
+            {item.synonyms.length ? (
+              <SynonymsText variant="caption">
+                Синонимы: {item.synonyms.join(', ')}
+              </SynonymsText>
+            ) : null}
+            {item.examples.length ? (

@@ -1,0 +1,134 @@
+   1: import { useCallback, useMemo, useState } from "react";
+   2: import { Alert } from "react-native";
+   3: import styled from "styled-components/native";
+   4: 
+   5: import { useAppDispatch, useAppSelector } from "@app/store/hooks";
+   6: import { authApi } from "@features/auth/api/authApi";
+   7: import { resetAuthState } from "@features/auth/model/authSlice";
+   8: import { hydrateProgress } from "@features/progress/model/progressSlice";\nimport { resetDictionary } from "@features/dictionary/model/dictionarySlice";
+   9: import { clearProfile } from "@entities/user/model/userSlice";
+  10: import { PrimaryButton, SurfaceCard, Typography } from "@shared/ui";
+  11: import { roleDisplayName } from "@shared/constants/roles";
+  12: 
+  13: const Screen = styled.View`
+  14:   flex: 1;
+  15:   padding: 64px 20px 20px;
+  16:   background-color: ${({ theme }) => theme.colors.backgroundAlt};
+  17:   gap: 20px;
+  18: `;
+  19: 
+  20: const Card = styled(SurfaceCard)`
+  21:   gap: 24px;
+  22: `;
+  23: 
+  24: const Header = styled.View`
+  25:   flex-direction: row;
+  26:   gap: 16px;
+  27:   align-items: center;
+  28: `;
+  29: 
+  30: const Avatar = styled.Image`
+  31:   width: 72px;
+  32:   height: 72px;
+  33:   border-radius: 36px;
+  34: `;
+  35: 
+  36: const Summary = styled.View`
+  37:   flex: 1;
+  38:   gap: 4px;
+  39: `;
+  40: 
+  41: const Metrics = styled.View`
+  42:   flex-direction: row;
+  43:   justify-content: space-between;
+  44:   gap: 12px;
+  45: `;
+  46: 
+  47: const Metric = styled.View`
+  48:   flex: 1;
+  49:   align-items: center;
+  50: `;
+  51: 
+  52: const AVATAR_BASE = "https://ui-avatars.com/api/";
+  53: 
+  54: const buildPlaceholderUrl = (fullName?: string | null) => {
+  55:   const name = fullName?.trim() ? fullName.trim() : "English Learner";
+  56:   const params = new URLSearchParams({
+  57:     name,
+  58:     background: "1E88E5",
+  59:     color: "FFFFFF",
+  60:     length: "2",
+  61:     bold: "true",
+  62:   });
+  63:   return `${AVATAR_BASE}?${params.toString()}`;
+  64: };
+  65: 
+  66: export const ProfileScreen = () => {
+  67:   const dispatch = useAppDispatch();
+  68:   const profile = useAppSelector((state) => state.user.profile);
+  69:   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  70: 
+  71:   const avatarSource = useMemo(() => {
+  72:     if (profile?.avatarUrl) {
+  73:       return { uri: profile.avatarUrl };
+  74:     }
+  75:     return { uri: buildPlaceholderUrl(profile?.fullName) };
+  76:   }, [profile?.avatarUrl, profile?.fullName]);
+  77: 
+  78:   const handleLogout = useCallback(async () => {
+  79:     if (isLoggingOut) return;
+  80:     setIsLoggingOut(true);
+  81:     try {
+  82:       await authApi.logout();
+  83:     } catch (error) {
+  84:       const message = error instanceof Error ? error.message : "РќРµ СѓРґР°Р»РѕСЃСЊ РІС‹РїРѕР»РЅРёС‚СЊ РІС‹С…РѕРґ";
+  85:       Alert.alert("Р’РЅРёРјР°РЅРёРµ", message);
+  86:     } finally {
+  87:       dispatch(resetAuthState());
+  88:       dispatch(clearProfile());
+  89:       dispatch(
+  90:         hydrateProgress({
+  91:           streak: 0,
+  92:           weeklyMinutes: 0,
+  93:           vocabularySize: 0,
+  94:           dailyProgress: [],
+  95:         }),
+  96:       );
+  97:       setIsLoggingOut(false);
+  98:     }
+  99:   }, [dispatch, isLoggingOut]);
+ 100: 
+ 101:   return (
+ 102:     <Screen>
+ 103:       <Card>
+ 104:         <Header>
+ 105:           <Avatar source={avatarSource} />
+ 106:           <Summary>
+ 107:             <Typography variant="subtitle">{profile?.fullName ?? "Р“РѕСЃС‚СЊ"}</Typography>
+ 108:             <Typography variant="caption">
+ 109:               {profile ? roleDisplayName[profile.role] : "РђРІС‚РѕСЂРёР·СѓР№С‚РµСЃСЊ, С‡С‚РѕР±С‹ РІРёРґРµС‚СЊ СЃС‚Р°С‚РёСЃС‚РёРєСѓ"}
+ 110:             </Typography>
+ 111:             <Typography variant="caption">{profile?.email ?? ""}</Typography>
+ 112:           </Summary>
+ 113:         </Header>
+ 114:         <Metrics>
+ 115:           <Metric>
+ 116:             <Typography variant="subtitle">{profile?.streakDays ?? 0}</Typography>
+ 117:             <Typography variant="caption">РЎРµСЂРёСЏ</Typography>
+ 118:           </Metric>
+ 119:           <Metric>
+ 120:             <Typography variant="subtitle">{profile?.completedLessons ?? 0}</Typography>
+ 121:             <Typography variant="caption">РЈСЂРѕРєРѕРІ</Typography>
+ 122:           </Metric>
+ 123:           <Metric>
+ 124:             <Typography variant="subtitle">{profile?.level ?? "-"}</Typography>
+ 125:             <Typography variant="caption">РЈСЂРѕРІРµРЅСЊ</Typography>
+ 126:           </Metric>
+ 127:         </Metrics>
+ 128:       </Card>
+ 129:       <PrimaryButton onPress={handleLogout} disabled={isLoggingOut}>
+ 130:         {isLoggingOut ? "Р’С‹С…РѕРґРёРјвЂ¦" : "Р’С‹Р№С‚Рё РёР· Р°РєРєР°СѓРЅС‚Р°"}
+ 131:       </PrimaryButton>
+ 132:     </Screen>
+ 133:   );
+ 134: };

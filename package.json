@@ -1,0 +1,21 @@
+{
+  "name": "english-platform",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:mobile": "npm run start --workspace @english/mobile",
+    "android": "npm run android --workspace @english/mobile",
+    "ios": "npm run ios --workspace @english/mobile",
+    "web": "npm run web --workspace @english/mobile",
+    "check:types": "npm run typecheck --workspace @english/mobile",
+    "dev:backend": "npm run dev --workspace backend",
+    "build:backend": "npm run build --workspace backend",
+    "dev:preview": "npm run dev --workspace @english/mobile-preview",
+    "lint:backend": "npm run lint --workspace backend"
+  }
+  
+}

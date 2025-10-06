@@ -1,0 +1,192 @@
+   1: import { useEffect, useMemo, useRef, useState } from 'react';
+   2: import { ActivityIndicator, Alert, FlatList } from 'react-native';
+   3: import styled from 'styled-components/native';
+   4: import { Audio as ExpoAudio } from 'expo-av';
+   5: import { useNavigation } from '@react-navigation/native';
+   6: 
+   7: import { useAppDispatch, useAppSelector } from '@app/store/hooks';
+   8: import {
+   9:   fetchUserDictionary,
+  10:   removeUserDictionaryEntry,
+  11:   selectDictionaryItems,
+  12:   selectDictionaryStatus,
+  13: } from '@features/dictionary/model/dictionarySlice';
+  14: import { SurfaceCard, Typography } from '@shared/ui';
+  15: 
+  16: const Screen = styled.View`
+  17:   flex: 1;
+  18:   background-color: ${({ theme }) => theme.colors.backgroundAlt};
+  19:   padding: 64px 20px 20px;
+  20:   gap: 20px;
+  21: `;
+  22: 
+  23: const TopRow = styled.View`
+  24:   flex-direction: row;
+  25:   justify-content: space-between;
+  26:   align-items: center;
+  27: `;
+  28: 
+  29: const PrimaryButton = styled.TouchableOpacity`
+  30:   background-color: ${({ theme }) => theme.colors.primary};
+  31:   border-radius: ${({ theme }) => theme.radius.md}px;
+  32:   padding: 12px 16px;
+  33: `;
+  34: 
+  35: const ButtonLabel = styled(Typography)`
+  36:   color: #ffffff;
+  37:   font-weight: 600;
+  38: `;
+  39: 
+  40: const WordCard = styled(SurfaceCard)`
+  41:   gap: 12px;
+  42: `;
+  43: 
+  44: const Row = styled.View`
+  45:   flex-direction: row;
+  46:   align-items: center;
+  47:   justify-content: space-between;
+  48:   gap: 12px;
+  49: `;
+  50: 
+  51: const AudioButton = styled.TouchableOpacity`
+  52:   background-color: rgba(30, 136, 229, 0.12);
+  53:   border-radius: ${({ theme }) => theme.radius.sm}px;
+  54:   padding: 6px 12px;
+  55: `;
+  56: 
+  57: const AudioLabel = styled(Typography)`
+  58:   color: ${({ theme }) => theme.colors.primary};
+  59: `;
+  60: 
+  61: const SmallButton = styled.TouchableOpacity`
+  62:   padding: 6px 10px;
+  63:   border-radius: ${({ theme }) => theme.radius.sm}px;
+  64:   background-color: ${({ theme }) => theme.colors.surfaceAlt};
+  65: `;
+  66: 
+  67: const SmallButtonLabel = styled(Typography)`
+  68:   color: ${({ theme }) => theme.colors.text};
+  69: `;
+  70: 
+  71: const Separator = styled.View`
+  72:   height: 16px;
+  73: `;
+  74: 
+  75: const EmptyState = styled(Typography)`
+  76:   text-align: center;
+  77:   color: ${({ theme }) => theme.colors.textSecondary};
+  78: `;
+  79: 
+  80: export const UserDictionaryScreen = () => {
+  81:   const navigation = useNavigation();
+  82:   const dispatch = useAppDispatch();
+  83:   const profile = useAppSelector((s) => s.user.profile);
+  84:   const items = useAppSelector(selectDictionaryItems);
+  85:   const status = useAppSelector(selectDictionaryStatus);
+  86: 
+  87:   const [playingId, setPlayingId] = useState<string | null>(null);
+  88:   const soundRef = useRef<ExpoAudio.Sound | null>(null);
+  89: 
+  90:   useEffect(() => {
+  91:     if (profile?.id) {
+  92:       dispatch(fetchUserDictionary({ userId: profile.id }));
+  93:     }
+  94:   }, [dispatch, profile?.id]);
+  95: 
+  96:   useEffect(() => {
+  97:     return () => {
+  98:       if (soundRef.current) {
+  99:         soundRef.current.unloadAsync().catch(() => undefined);
+ 100:         soundRef.current = null;
+ 101:       }
+ 102:     };
+ 103:   }, []);
+ 104: 
+ 105:   const playAudio = async (id: string, url: string) => {
+ 106:     try {
+ 107:       if (playingId === id && soundRef.current) {
+ 108:         await soundRef.current.stopAsync();
+ 109:         await soundRef.current.unloadAsync();
+ 110:         soundRef.current = null;
+ 111:         setPlayingId(null);
+ 112:         return;
+ 113:       }
+ 114:       if (soundRef.current) {
+ 115:         await soundRef.current.stopAsync().catch(() => undefined);
+ 116:         await soundRef.current.unloadAsync().catch(() => undefined);
+ 117:         soundRef.current = null;
+ 118:       }
+ 119:       const { sound } = await ExpoAudio.Sound.createAsync({ uri: url });
+ 120:       soundRef.current = sound;
+ 121:       setPlayingId(id);
+ 122:       await sound.playAsync();
+ 123:       sound.setOnPlaybackStatusUpdate((s) => {
+ 124:         if (!s.isLoaded) return;
+ 125:         if ((s as any).didJustFinish) {
+ 126:           setPlayingId((current) => (current === id ? null : current));
+ 127:           sound.unloadAsync().catch(() => undefined);
+ 128:           soundRef.current = null;
+ 129:         }
+ 130:       });
+ 131:     } catch {
+ 132:       Alert.alert('Не удалось воспроизвести аудио');
+ 133:       setPlayingId((current) => (current === id ? null : current));
+ 134:     }
+ 135:   };
+ 136: 
+ 137:   const content = useMemo(() => {
+ 138:     if (status === 'loading') {
+ 139:       return <ActivityIndicator size="large" color="#1E88E5" />;
+ 140:     }
+ 141:     if (!items.length) {
+ 142:       return <EmptyState>Ваш словарь пуст. Найдите слово и сохраните в словарь.</EmptyState>;
+ 143:     }
+ 144:     return (
+ 145:       <FlatList
+ 146:         data={items}
+ 147:         keyExtractor={(item) => item.id}
+ 148:         showsVerticalScrollIndicator={false}
+ 149:         ItemSeparatorComponent={() => <Separator />}
+ 150:         renderItem={({ item }) => (
+ 151:           <WordCard padded>
+ 152:             <Row>
+ 153:               <Typography variant="subtitle">{item.word}</Typography>
+ 154:               {item.audioUrl ? (
+ 155:                 <AudioButton onPress={() => playAudio(`${item.id}-saved`, item.audioUrl!)}>
+ 156:                   <AudioLabel variant="caption">{playingId === `${item.id}-saved` ? 'Стоп' : 'Прослушать'}</AudioLabel>
+ 157:                 </AudioButton>
+ 158:               ) : null}
+ 159:             </Row>
+ 160:             {item.transcription ? <Typography variant="caption">{item.transcription}</Typography> : null}
+ 161:             {item.partOfSpeech ? <Typography variant="caption">{item.partOfSpeech}</Typography> : null}
+ 162:             <Row>
+ 163:               <Typography>— {item.translation}</Typography>
+ 164:               <SmallButton
+ 165:                 onPress={() => {
+ 166:                   if (!profile?.id) return;
+ 167:                   dispatch(removeUserDictionaryEntry({ userId: profile.id, id: item.id }));
+ 168:                 }}
+ 169:               >
+ 170:                 <SmallButtonLabel variant="caption">Удалить</SmallButtonLabel>
+ 171:               </SmallButton>
+ 172:             </Row>
+ 173:           </WordCard>
+ 174:         )}
+ 175:         contentContainerStyle={{ paddingBottom: 32 }}
+ 176:       />
+ 177:     );
+ 178:   }, [dispatch, items, playingId, profile?.id, status]);
+ 179: 
+ 180:   return (
+ 181:     <Screen>
+ 182:       <TopRow>
+ 183:         <Typography variant="title">Мой словарь</Typography>
+ 184:         <PrimaryButton onPress={() => (navigation as any).navigate('DictionarySearch') }>
+ 185:           <ButtonLabel>Поиск слов</ButtonLabel>
+ 186:         </PrimaryButton>
+ 187:       </TopRow>
+ 188:       {content}
+ 189:     </Screen>
+ 190:   );
+ 191: };
+ 192: 

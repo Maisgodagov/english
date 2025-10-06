@@ -1,0 +1,55 @@
+   1: import type { PropsWithChildren } from 'react';
+   2: import { css } from 'styled-components';
+   3: import styled from 'styled-components/native';
+   4: 
+   5: export type TypographyVariant = 'title' | 'subtitle' | 'body' | 'caption';
+   6: 
+   7: export type TypographyProps = PropsWithChildren<{
+   8:   variant?: TypographyVariant;
+   9:   color?: string;
+  10:   align?: 'left' | 'center' | 'right';
+  11:   style?: object;
+  12: }>;
+  13: 
+  14: const StyledText = styled.Text<{ $variant: TypographyVariant; $color?: string; $align: 'left' | 'center' | 'right' }>`
+  15:   color: ${({ theme, $color }) => $color ?? theme.colors.text};
+  16:   text-align: ${({ $align }) => $align};
+  17:   ${({ $variant, theme }) => {
+  18:     switch ($variant) {
+  19:       case 'title':
+  20:         return css`
+  21:           font-size: 28px;
+  22:           font-weight: 700;
+  23:         `;
+  24:       case 'subtitle':
+  25:         return css`
+  26:           font-size: 20px;
+  27:           font-weight: 600;
+  28:         `;
+  29:       case 'caption':
+  30:         return css`
+  31:           font-size: 14px;
+  32:           font-weight: 400;
+  33:           color: ${theme.colors.textSecondary};
+  34:         `;
+  35:       case 'body':
+  36:       default:
+  37:         return css`
+  38:           font-size: 16px;
+  39:           font-weight: 400;
+  40:         `;
+  41:     }
+  42:   }}
+  43: `;
+  44: 
+  45: export const Typography = ({
+  46:   children,
+  47:   variant = 'body',
+  48:   color,
+  49:   align = 'left',
+  50:   style,
+  51: }: TypographyProps) => (
+  52:   <StyledText $variant={variant} $color={color} $align={align} style={style}>
+  53:     {children}
+  54:   </StyledText>
+  55: );
