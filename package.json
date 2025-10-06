@@ -8,7 +8,8 @@
   ],
   "overrides": {
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "react-native-reanimated": "~3.10.1"
   },
   "scripts": {
     "dev:mobile": "node scripts/ensure-single-react.js && npm run start --workspace @english/mobile",
