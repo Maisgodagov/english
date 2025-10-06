@@ -7,11 +7,11 @@
     "packages/*"
   ],
   "scripts": {
-    "dev:mobile": "npm run start --workspace @english/mobile",
-    "android": "npm run android --workspace @english/mobile",
-    "ios": "npm run ios --workspace @english/mobile",
-    "web": "npm run web --workspace @english/mobile",
-    "check:types": "npm run typecheck --workspace @english/mobile",
+    "dev:mobile": "node scripts/ensure-single-react.js && npm run start --workspace @english/mobile",
+    "android": "node scripts/ensure-single-react.js && npm run android --workspace @english/mobile",
+    "ios": "node scripts/ensure-single-react.js && npm run ios --workspace @english/mobile",
+    "web": "node scripts/ensure-single-react.js && npm run web --workspace @english/mobile",
+    "check:types": "node scripts/ensure-single-react.js && npm run typecheck --workspace @english/mobile",
     "dev:backend": "npm run dev --workspace backend",
     "build:backend": "npm run build --workspace backend",
     "dev:preview": "npm run dev --workspace @english/mobile-preview",
